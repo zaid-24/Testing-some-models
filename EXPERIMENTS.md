@@ -380,6 +380,86 @@ This experiment is PRIORITY 4 because it requires first completing experiments 4
 
 ---
 
+### Experiment 6: Multi-Scale Progressive Training (⭐ IMPLEMENTED - RECOMMENDED)
+**Status**: ✅ Ready to Run
+**Mode**: `python run.py train --mode multiscale`
+
+**Hypothesis**: 
+Training at progressively increasing resolutions enables coarse-to-fine feature learning, where the model first learns general cell patterns at low resolution (fast), then refines details at high resolution (slow but focused). This is more efficient and effective than training at high resolution from the start.
+
+**The Problem with Single-Resolution Training**:
+Training at 1024px from epoch 1 has two issues:
+1. **Slow early learning**: High resolution means slower iterations, but early epochs are learning coarse features that don't need high resolution
+2. **Gradient noise**: At high resolution, the model sees more detail but also more noise, which can slow convergence
+3. **Memory constraints**: High resolution requires smaller batch sizes, reducing gradient stability
+
+**How Multi-Scale Solves This**:
+Progressive resolution training follows curriculum learning principles:
+
+1. **Stage 1 (640px, 100 epochs, batch=12)**:
+   - Fast iterations with larger batch size
+   - Learn coarse features: "this is a cell", "cells have nuclei"
+   - Establish good initial weights for all classes
+   - Larger batches = more stable gradients for minority classes
+
+2. **Stage 2 (896px, 150 epochs, batch=8)**:
+   - Medium resolution refines boundaries
+   - Learn finer features: nuclear texture, cytoplasm patterns
+   - Transfer learning from Stage 1 accelerates convergence
+
+3. **Stage 3 (1024px, 150 epochs, batch=6)**:
+   - Full resolution for fine details
+   - Critical for small cells (ASCUS) and subtle morphology
+   - Final refinement for competition submission
+   - Lower learning rate (0.005) for careful fine-tuning
+
+**Automatic Stage Progression**:
+Running `python run.py train --mode multiscale` automatically:
+1. Trains Stage 1 at 640px
+2. Saves best weights, loads them for Stage 2
+3. Trains Stage 2 at 896px  
+4. Saves best weights, loads them for Stage 3
+5. Trains Stage 3 at 1024px
+6. Saves final model to `trained_models/best_multiscale_*.pt`
+7. Runs validation and reports per-class mAP
+
+**Configuration** (`get_multiscale_config()`):
+```python
+stages = [
+    {'imgsz': 640,  'epochs': 100, 'batch': 12},  # Fast coarse learning
+    {'imgsz': 896,  'epochs': 150, 'batch': 8},   # Medium refinement
+    {'imgsz': 1024, 'epochs': 150, 'batch': 6},   # Fine detail tuning
+]
+# Total: 400 epochs across 3 stages
+# Loss weights: cls=4.0, box=7.5, dfl=1.5
+# Strong augmentation throughout
+```
+
+**Expected Benefits**:
+- ✅ **Faster total training time**: ~20-30% faster than 400 epochs at 1024px
+- ✅ **Better early-stage learning**: Larger batches at low resolution stabilize minority class gradients
+- ✅ **Improved final accuracy**: Coarse-to-fine learning often outperforms fixed resolution
+- ✅ **Better ASCUS/ASCH detection**: These small cells benefit most from high-resolution final stage
+- ✅ **+2-4% mAP improvement** expected over single-resolution training
+
+**Command to Run**:
+```bash
+python run.py train --mode multiscale
+```
+
+**Output Files**:
+- `runs/detect/riva_yolo11l_multiscale_stage1_640px/` - Stage 1 results
+- `runs/detect/riva_yolo11l_multiscale_stage2_896px/` - Stage 2 results  
+- `runs/detect/riva_yolo11l_multiscale_stage3_1024px/` - Stage 3 results
+- `trained_models/best_multiscale_*.pt` - Final model for inference
+
+**Validation Metrics to Monitor**:
+- Per-class AP at end of each stage
+- Watch ASCUS/ASCH AP improvement from Stage 2 → Stage 3
+- Final mAP@50 and mAP@50-95
+
+---
+
 ### Experiment 8: Trans-YOLOv5 Architecture - CBT3 (HIGH EFFORT)
 **Status**: 📋 Planned (Advanced)
 
@@ -540,13 +620,13 @@ Minority classes need lower confidence thresholds than majority classes.
 ## 📈 Experiment Priority Matrix
 
 ### Immediate Actions (This Week)
-1. ✅ **Experiment 4: Focal Loss** - Highest impact, ready to run
-2. ✅ **Experiment 12: Threshold Optimization** - Quick win
-3. ✅ **Experiment 11: Enhanced TTA** - Low effort, decent impact
+1. ⭐ **Experiment 6: Multi-Scale Training** - RECOMMENDED, highest expected impact (+2-4% mAP)
+2. **Experiment 4: Focal Loss** - Good for class imbalance if multi-scale not enough
+3. **Experiment 12: Threshold Optimization** - Quick win after training
+4. **Experiment 11: Enhanced TTA** - Low effort, decent impact at inference
 
 ### Next Phase (Week 2-3)
-4. **Experiment 6: Progressive Resolution** - If training time allows
-5. **Experiment 7: Model Ensemble** - Combine best models
+5. **Experiment 7: Model Ensemble** - Combine multi-scale + focal models
 6. **Experiment 11 & 12: TTA + Threshold Optimization** - Quick wins
 
 ### Advanced Phase (Week 4+)

@@ -75,8 +75,8 @@ Examples:
     
     # Train command
     train_parser = subparsers.add_parser('train', help='Train YOLOv11 model')
-    train_parser.add_argument('--mode', choices=['test', 'full', 'focal', 'adh'], default='test',
-                              help='Training mode (test=laptop, full=extreme aug, focal=focal loss, adh=attention decoupled head)')
+    train_parser.add_argument('--mode', choices=['test', 'full', 'focal', 'adh', 'multiscale'], default='test',
+                              help='Training mode (test=laptop, full=extreme aug, focal=focal loss, adh=attention decoupled head, multiscale=progressive resolution)')
     train_parser.add_argument('--resume', action='store_true',
                               help='Resume from last checkpoint')
     

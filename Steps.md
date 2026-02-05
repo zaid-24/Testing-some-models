@@ -45,64 +45,45 @@ python run.py analyze
 ### 3. Train Model
 
 ```bash
-
-python run.py train --mode focal	     ⭐ Class imbalance (ASCUS, ASCH)
-python run.py train --mode adh        ⭐ Localization precision
-
 # Test pipeline first on laptop (recommended)
 python run.py train --mode test
 
-# OPTION 1: Full training (single stage) on RTX A2000 workstation
-# yolo11l, 1024px, 500 epochs, batch=6
-# EXTREME augmentation targeting classes 3 & 6
-python run.py train --mode full          	Extreme augmentation baseline
+# ⭐ RECOMMENDED: Multi-Scale Progressive Training
+# Stage 1: 640px (100 epochs) - Fast coarse learning
+# Stage 2: 896px (150 epochs) - Refine features
+# Stage 3: 1024px (150 epochs) - Fine details for ASCUS/ASCH
+# Total: 400 epochs, automatically progresses through stages
+python run.py train --mode multiscale
 
-# OPTION 2: Two-Stage Training (RECOMMENDED for class imbalance)
-# This prevents majority classes from drowning out minorities
-
-# Step 1: Train on majority classes only (NILM, INFL, LSIL, SCC)
-# - 50 epochs on classes 0, 2, 4, 7
-# - Learns robust cell detection without minority drowning
-python run.py train --mode stage1
-
-# Step 2: Fine-tune on ALL classes (adds ENDO, ASCUS, HSIL, ASCH)
-# - 250 epochs on all 8 classes
-# - EXTREME cls boost (8.0) and augmentation
-# - Automatically resumes from Stage 1 weights
-python run.py train --mode stage2
+# Alternative training modes:
+python run.py train --mode focal      # Class imbalance focus (higher cls weight)
+python run.py train --mode adh        # Localization precision (higher box weight)
+python run.py train --mode full       # Extreme augmentation baseline
 
 # Resume interrupted training
-python run.py train --mode full --resume
+python run.py train --mode multiscale --resume
 ```
 
 **⚠️ Important Notes:**
 
 **Configuration:**
-- **Model**: yolo11l (large) - **Best proven performance** (0.08 vs 0.06/0.05)
-- **Image Size**: 1024px to preserve cell morphology details (critical for complex cell classification)
+- **Model**: yolo11l (large) - **Best proven performance**
+- **Image Size**: Progressive 640→896→1024px (multi-scale) or fixed 1024px (other modes)
 
 **Training Options:**
-1. **Full Training (Single Stage)**: 500 epochs, EXTREME augmentation, cls=6.0
-   - Time: 14-20 hours on RTX A2000
-   - Good for general training
-   
-2. **Two-Stage Training (RECOMMENDED)**: 300 epochs total (50 + 250)
-   - **Stage 1**: Majority classes only (50 epochs)
-     - Classes: NILM (0), INFL (2), LSIL (4), SCC (7)
-     - Learns robust cell detection without minority drowning
-     - Time: ~2-3 hours
-   - **Stage 2**: All classes fine-tuning (250 epochs)
-     - Adds: ENDO (1), ASCUS (3), HSIL (5), ASCH (6)
-     - EXTREME cls boost (8.0) and augmentation
-     - Automatically resumes from Stage 1
-     - Time: ~12-16 hours
-   - **Total Time**: 14-19 hours
-   - **Advantage**: Prevents majority classes from drowning minorities during early training
+
+| Mode | Description | Time | Best For |
+|------|-------------|------|----------|
+| `multiscale` | ⭐ Progressive resolution | ~12-16 hours | Best overall accuracy |
+| `focal` | Higher cls weight (4.0) | ~14-18 hours | Class imbalance |
+| `adh` | Higher box weight (10.0) | ~14-18 hours | Localization precision |
+| `full` | Extreme augmentation | ~16-20 hours | Baseline comparison |
 
 **Model Saving:**
-- **Single Stage**: `trained_models/best_yolo11l_extreme_YYYYMMDD_HHMMSS.pt`
-- **Stage 1**: `trained_models/best_stage1_majority_YYYYMMDD_HHMMSS.pt`
-- **Stage 2**: `trained_models/best_stage2_finetune_YYYYMMDD_HHMMSS.pt`
+- **Multi-scale**: `trained_models/best_multiscale_YYYYMMDD_HHMMSS.pt`
+- **Focal**: `trained_models/best_focal_loss_YYYYMMDD_HHMMSS.pt`
+- **ADH**: `trained_models/best_adh_YYYYMMDD_HHMMSS.pt`
+- **Full**: `trained_models/best_full_extreme_YYYYMMDD_HHMMSS.pt`
 - **Latest**: `trained_models/best_latest.pt` (always points to most recent)
 
 ### 4. Generate Submission

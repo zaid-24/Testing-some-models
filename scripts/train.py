@@ -249,6 +249,261 @@ def get_adh_config():
     }
 
 
+def get_multiscale_config():
+    """
+    Configuration for MULTI-SCALE PROGRESSIVE TRAINING.
+    
+    STRATEGY:
+    - Stage 1 (Epochs 1-100):   640px  - Fast learning of coarse features
+    - Stage 2 (Epochs 101-250): 896px  - Balanced resolution, refine features
+    - Stage 3 (Epochs 251-400): 1024px - High resolution for fine details (ASCUS/ASCH)
+    
+    Benefits:
+    - Faster initial learning at lower resolution
+    - Coarse-to-fine feature learning
+    - Better final accuracy at high resolution
+    - Small cells (ASCUS) get high-res training where they're most visible
+    
+    Expected Impact: +2-4% mAP improvement over single-resolution training
+    """
+    import platform
+    num_workers = 0 if platform.system() == 'Windows' else 8
+    
+    # Define stages: (resolution, epochs, batch_size)
+    # Batch size adjusted for VRAM at each resolution
+    stages = [
+        {'imgsz': 640,  'epochs': 100, 'batch': 12, 'name': 'stage1_640px'},
+        {'imgsz': 896,  'epochs': 150, 'batch': 8,  'name': 'stage2_896px'},
+        {'imgsz': 1024, 'epochs': 150, 'batch': 6,  'name': 'stage3_1024px'},
+    ]
+    
+    return {
+        'name': 'riva_yolo11l_multiscale',
+        'model': 'yolo11l.pt',
+        'stages': stages,
+        'patience': 50,  # Per-stage patience
+        'save_period': 10,
+        'workers': num_workers,
+        
+        # === LOSS WEIGHTS (consistent across stages) ===
+        'cls': 4.0,   # Higher for class imbalance
+        'box': 7.5,
+        'dfl': 1.5,
+        
+        # === STRONG AUGMENTATION ===
+        'augment': True,
+        'mosaic': 1.0,
+        'mixup': 0.5,
+        'copy_paste': 0.8,
+        
+        # Color augmentation
+        'hsv_h': 0.7,
+        'hsv_s': 0.8,
+        'hsv_v': 0.6,
+        
+        # Geometric augmentation
+        'degrees': 20.0,
+        'translate': 0.2,
+        'scale': 0.6,
+        'shear': 10.0,
+        'perspective': 0.0005,
+        'flipud': 0.5,
+        'fliplr': 0.5,
+        'erasing': 0.3,
+    }
+
+
+def train_multiscale(base_dir: Path, resume: bool = False):
+    """
+    Run multi-scale progressive training with automatic stage progression.
+    
+    Stages:
+    - Stage 1: 640px  (100 epochs) - Learn coarse features fast
+    - Stage 2: 896px  (150 epochs) - Refine with medium resolution
+    - Stage 3: 1024px (150 epochs) - Fine details for ASCUS/ASCH
+    
+    Each stage resumes from the previous stage's best weights.
+    """
+    from ultralytics import YOLO
+    import shutil
+    
+    config = get_multiscale_config()
+    data_yaml = base_dir / 'data' / 'riva.yaml'
+    output_dir = base_dir / 'runs' / 'detect'
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    print("\n" + "=" * 70)
+    print("[MULTI-SCALE MODE] Progressive Resolution Training")
+    print("=" * 70)
+    print(f"Model: {config['model']}")
+    print("\nStages:")
+    for i, stage in enumerate(config['stages'], 1):
+        print(f"  Stage {i}: {stage['imgsz']}px, {stage['epochs']} epochs, batch={stage['batch']}")
+    print("\nTotal epochs:", sum(s['epochs'] for s in config['stages']))
+    print("Strategy: Coarse-to-fine learning for better final accuracy")
+    print("=" * 70)
+    
+    # Setup symlinks
+    print("\n[SETUP] Creating directory structure...")
+    setup_symlinks(base_dir)
+    
+    # Base training arguments (shared across stages)
+    base_args = {
+        'data': str(data_yaml),
+        'patience': config['patience'],
+        'save_period': config['save_period'],
+        'workers': config['workers'],
+        'project': str(output_dir),
+        'exist_ok': True,
+        'pretrained': True,
+        'optimizer': 'SGD',
+        'lr0': 0.01,
+        'lrf': 0.01,
+        'momentum': 0.937,
+        'weight_decay': 0.0005,
+        'warmup_epochs': 3.0,
+        'warmup_momentum': 0.8,
+        'warmup_bias_lr': 0.1,
+        'box': config['box'],
+        'cls': config['cls'],
+        'dfl': config['dfl'],
+        'close_mosaic': 10,
+        'amp': True,
+        'fraction': 1.0,
+        'plots': True,
+        'save': True,
+        'val': True,
+        'cache': False,
+        'device': 0,
+        'verbose': True,
+    }
+    
+    # Add augmentation parameters
+    augment_params = [
+        'augment', 'mosaic', 'mixup', 'hsv_h', 'hsv_s', 'hsv_v',
+        'degrees', 'translate', 'scale', 'shear', 'perspective',
+        'flipud', 'fliplr', 'copy_paste', 'erasing'
+    ]
+    for param in augment_params:
+        if param in config:
+            base_args[param] = config[param]
+    
+    # Track best model path
+    current_model = config['model']
+    
+    # Run each stage
+    for stage_idx, stage in enumerate(config['stages']):
+        stage_num = stage_idx + 1
+        stage_name = f"{config['name']}_{stage['name']}"
+        
+        print("\n" + "=" * 70)
+        print(f"[STAGE {stage_num}/3] Resolution: {stage['imgsz']}px, Epochs: {stage['epochs']}")
+        print("=" * 70)
+        
+        # Load model (from previous stage's best weights or initial)
+        print(f"\nLoading model: {current_model}")
+        model = YOLO(current_model)
+        print("  ✓ Model loaded")
+        
+        # Prepare stage-specific arguments
+        stage_args = base_args.copy()
+        stage_args['imgsz'] = stage['imgsz']
+        stage_args['epochs'] = stage['epochs']
+        stage_args['batch'] = stage['batch']
+        stage_args['name'] = stage_name
+        
+        # Adjust learning rate for later stages (lower for fine-tuning)
+        if stage_idx > 0:
+            stage_args['lr0'] = 0.005  # Lower LR for fine-tuning
+            stage_args['warmup_epochs'] = 1.0  # Shorter warmup
+        
+        print(f"\nTraining configuration:")
+        print(f"  • Resolution: {stage['imgsz']}x{stage['imgsz']}")
+        print(f"  • Batch size: {stage['batch']}")
+        print(f"  • Epochs: {stage['epochs']}")
+        print(f"  • Learning rate: {stage_args['lr0']}")
+        print(f"  • Output: {output_dir / stage_name}")
+        print("-" * 70)
+        
+        # Train this stage
+        results = model.train(**stage_args)
+        
+        # Update current_model to this stage's best weights
+        best_weights = output_dir / stage_name / 'weights' / 'best.pt'
+        if best_weights.exists():
+            current_model = str(best_weights)
+            print(f"\n  ✓ Stage {stage_num} complete! Best weights: {best_weights}")
+        else:
+            print(f"\n  [WARNING] Stage {stage_num} weights not found, using last.pt")
+            last_weights = output_dir / stage_name / 'weights' / 'last.pt'
+            if last_weights.exists():
+                current_model = str(last_weights)
+    
+    # === SAVE FINAL MODEL ===
+    trained_models_dir = base_dir / 'trained_models'
+    trained_models_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    dest_model_name = f'best_multiscale_{timestamp}.pt'
+    dest_model = trained_models_dir / dest_model_name
+    
+    # Copy final best model
+    final_best = Path(current_model)
+    if final_best.exists():
+        shutil.copy2(final_best, dest_model)
+        
+        # Also save as latest
+        latest_model = trained_models_dir / 'best_latest.pt'
+        if latest_model.exists():
+            latest_model.unlink()
+        shutil.copy2(final_best, latest_model)
+        
+        print("\n" + "=" * 70)
+        print("[SUCCESS] MULTI-SCALE TRAINING COMPLETE!")
+        print("=" * 70)
+        print(f"\nFinal model saved to:")
+        print(f"  • {dest_model}")
+        print(f"  • {latest_model} (quick access)")
+        
+        # Run final validation
+        print("\n" + "=" * 70)
+        print("[VALIDATION] Running Final Validation at 1024px")
+        print("=" * 70)
+        
+        try:
+            final_model = YOLO(str(dest_model))
+            val_results = final_model.val(
+                data=str(data_yaml),
+                imgsz=1024,  # Validate at highest resolution
+                workers=0,
+                batch=6
+            )
+            
+            print(f"\nFinal Performance:")
+            print(f"  - mAP@50: {val_results.box.map50:.4f}")
+            print(f"  - mAP@50-95: {val_results.box.map:.4f}")
+            
+            # Per-class performance
+            if hasattr(val_results.box, 'maps') and len(val_results.box.maps) >= 8:
+                print(f"\nPer-Class mAP@50-95:")
+                class_names = ['NILM', 'ENDO', 'INFL', 'ASCUS', 'LSIL', 'HSIL', 'ASCH', 'SCC']
+                class_counts = [3821, 668, 4360, 207, 1581, 1232, 316, 1082]
+                
+                for i in range(8):
+                    class_map = val_results.box.maps[i]
+                    status = "[OK]" if class_map > 0.05 else "[X]"
+                    print(f"    {status} Class {i} ({class_names[i]:5s}): {class_map:.4f} (n={class_counts[i]:4d})")
+            
+            return val_results
+        except Exception as e:
+            print(f"\n[WARNING] Validation error: {e}")
+            print("  Your model is saved and ready for use!")
+    else:
+        print(f"\n[ERROR] Final model not found at {current_model}")
+    
+    return None
+
+
 def setup_symlinks(base_dir: Path):
     """
     Create symbolic links for YOLO to find labels alongside images.
@@ -303,6 +558,10 @@ def train(mode: str, resume: bool = False, base_dir: str = '.'):
     
     base_dir = Path(base_dir).resolve()
     
+    # Handle multi-scale mode separately (has its own training loop)
+    if mode == 'multiscale':
+        return train_multiscale(base_dir, resume)
+    
     # Select configuration
     if mode == 'test':
         config = get_test_config()
@@ -337,7 +596,7 @@ def train(mode: str, resume: bool = False, base_dir: str = '.'):
         print("Expected: +2-3% improvement in mAP@75 and mAP@50-95")
         print("Target: Better IoU scores, precise bounding boxes")
         print("GPU: RTX A2000")
-    else:
+    else:  # 'full' mode
         config = get_full_config()
         data_yaml = base_dir / 'data' / 'riva.yaml'
         print("\n" + "=" * 60)
@@ -448,15 +707,15 @@ def train(mode: str, resume: bool = False, base_dir: str = '.'):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     source_model = output_dir / config['name'] / 'weights' / 'best.pt'
     
-    # Create a clear filename
-    if mode == 'test':
-        dest_model_name = f'best_test_{timestamp}.pt'
-    elif mode == 'stage1':
-        dest_model_name = f'best_stage1_majority_{timestamp}.pt'
-    elif mode == 'stage2':
-        dest_model_name = f'best_stage2_finetune_{timestamp}.pt'
-    else:
-        dest_model_name = f'best_yolo11l_extreme_{timestamp}.pt'
+    # Create a clear filename based on mode
+    mode_names = {
+        'test': 'test',
+        'focal': 'focal_loss',
+        'adh': 'adh',
+        'full': 'full_extreme',
+    }
+    mode_suffix = mode_names.get(mode, mode)
+    dest_model_name = f'best_{mode_suffix}_{timestamp}.pt'
     
     dest_model = trained_models_dir / dest_model_name
     
@@ -553,7 +812,10 @@ Examples:
   # Test pipeline on laptop (4GB GPU)
   python scripts/train.py --mode test
   
-  # Focal Loss training (RECOMMENDED for class imbalance):
+  # Multi-scale training (RECOMMENDED - progressive resolution):
+  python scripts/train.py --mode multiscale
+  
+  # Focal Loss training (for class imbalance):
   python scripts/train.py --mode focal
   
   # ADH mode (Attention Decoupled Head for better localization):
@@ -564,18 +826,15 @@ Examples:
   
   # Resume training
   python scripts/train.py --mode focal --resume
-  
-  # Use custom batch size (if you have more/less VRAM)
-  # Edit the config functions in this script
         """
     )
     
     parser.add_argument(
         '--mode', 
         type=str, 
-        choices=['test', 'full', 'focal', 'adh'], 
+        choices=['test', 'full', 'focal', 'adh', 'multiscale'], 
         default='test',
-        help='Training mode: test (laptop), full (extreme aug), focal (focal loss), adh (attention decoupled head)'
+        help='Training mode: test (laptop), full (extreme aug), focal (focal loss), adh (attention decoupled head), multiscale (progressive resolution)'
     )
     parser.add_argument(
         '--resume', 

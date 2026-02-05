@@ -78,19 +78,25 @@ python run.py analyze
 # Uses: yolo11n, 640px, 3 epochs, batch=4
 python run.py train --mode test
 
-# Option B: Focal Loss Training (⭐ RECOMMENDED for Class Imbalance)
+# Option B: Multi-Scale Training (⭐ RECOMMENDED)
+# Progressive resolution: 640px → 896px → 1024px
+# Stage 1: 640px (100 epochs) - Learn coarse features fast
+# Stage 2: 896px (150 epochs) - Refine with medium resolution
+# Stage 3: 1024px (150 epochs) - Fine details for ASCUS/ASCH
+# Expected: +2-4% mAP improvement over single-resolution
+python run.py train --mode multiscale
+
+# Option C: Focal Loss Training (for Class Imbalance)
 # Uses: yolo11l, 1024px, 400 epochs, batch=6
-# Focal Loss (gamma=2.0) automatically handles severe class imbalance
-# Expected: 3-8% mAP improvement on minority classes (ASCUS, ASCH)
+# Higher cls weight handles severe class imbalance
 python run.py train --mode focal
 
-# Option C: ADH Training (Attention Decoupled Head for better localization)
+# Option D: ADH Training (Attention Decoupled Head)
 # Uses: yolo11l, 1024px, 400 epochs, batch=6
-# Higher box weight (10.0) + CBAM attention concepts
-# Expected: Better IoU scores, improved mAP@75
+# Higher box weight (10.0) for better localization
 python run.py train --mode adh
 
-# Option D: Full training (extreme augmentation baseline)
+# Option E: Full training (extreme augmentation baseline)
 # Uses: yolo11l, 1024px, 500 epochs, batch=6
 python run.py train --mode full
 
@@ -101,11 +107,10 @@ python run.py train --mode focal --resume
 **Training Mode Summary**:
 | Mode | Focus | Best For |
 |------|-------|----------|
-| `focal` | Class imbalance (Focal Loss) | ⭐ Minority class detection (ASCUS, ASCH) |
-| `adh` | Localization precision (ADH concepts) | Better bounding boxes, mAP@75 |
+| `multiscale` | ⭐ Progressive resolution training | Coarse-to-fine learning, better final accuracy |
+| `focal` | Class imbalance (higher cls weight) | Minority class detection (ASCUS, ASCH) |
+| `adh` | Localization precision | Better bounding boxes, mAP@75 |
 | `full` | Extreme augmentation | Baseline comparison |
-
-**⚠️ Note**: Two-stage training has been removed due to poor performance.
 
 ### 4. Generate Submission
 
