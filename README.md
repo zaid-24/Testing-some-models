@@ -78,25 +78,30 @@ python run.py analyze
 # Uses: yolo11n, 640px, 3 epochs, batch=4
 python run.py train --mode test
 
-# Option B: Multi-Scale Training (⭐ RECOMMENDED)
+# Option B: Fixed Anchor Training (⭐ RECOMMENDED)
+# ALL BOUNDING BOXES IN THIS DATASET ARE 100x100 PIXELS!
+# This mode minimizes box loss and maximizes classification focus
+# Uses: yolo11l, 1024px, 400 epochs, cls=8.0, box=0.5
+python run.py train --mode fixedanchor
+
+# Option C: Multi-Scale Training
 # Progressive resolution: 640px → 896px → 1024px
 # Stage 1: 640px (100 epochs) - Learn coarse features fast
 # Stage 2: 896px (150 epochs) - Refine with medium resolution
 # Stage 3: 1024px (150 epochs) - Fine details for ASCUS/ASCH
-# Expected: +2-4% mAP improvement over single-resolution
 python run.py train --mode multiscale
 
-# Option C: Focal Loss Training (for Class Imbalance)
+# Option D: Focal Loss Training (for Class Imbalance)
 # Uses: yolo11l, 1024px, 400 epochs, batch=6
 # Higher cls weight handles severe class imbalance
 python run.py train --mode focal
 
-# Option D: ADH Training (Attention Decoupled Head)
+# Option E: ADH Training (Attention Decoupled Head)
 # Uses: yolo11l, 1024px, 400 epochs, batch=6
 # Higher box weight (10.0) for better localization
 python run.py train --mode adh
 
-# Option E: Full training (extreme augmentation baseline)
+# Option F: Full training (extreme augmentation baseline)
 # Uses: yolo11l, 1024px, 500 epochs, batch=6
 python run.py train --mode full
 
@@ -107,9 +112,10 @@ python run.py train --mode focal --resume
 **Training Mode Summary**:
 | Mode | Focus | Best For |
 |------|-------|----------|
-| `multiscale` | ⭐ Progressive resolution training | Coarse-to-fine learning, better final accuracy |
-| `focal` | Class imbalance (higher cls weight) | Minority class detection (ASCUS, ASCH) |
-| `adh` | Localization precision | Better bounding boxes, mAP@75 |
+| `fixedanchor` | ⭐ Point detection (all boxes are 100x100) | Best for this dataset |
+| `multiscale` | Progressive resolution training | Coarse-to-fine learning |
+| `focal` | Class imbalance (higher cls weight) | Minority class detection |
+| `adh` | Localization precision | Better bounding boxes |
 | `full` | Extreme augmentation | Baseline comparison |
 
 ### 4. Generate Submission
@@ -117,6 +123,10 @@ python run.py train --mode focal --resume
 ```bash
 # Run inference on test set
 python run.py infer
+
+# With fixed anchor mode (use with fixedanchor trained model)
+# Forces all boxes to be 100x100 pixels (matches ground truth)
+python run.py infer --fixed-anchor
 
 # With custom settings
 python run.py infer --conf 0.25 --iou 0.45

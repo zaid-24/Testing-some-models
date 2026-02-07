@@ -207,7 +207,9 @@ def run_inference(
     imgsz: int = 1024,
     device: int = 0,
     save_visualizations: bool = True,
-    use_tta: bool = False
+    use_tta: bool = False,
+    fixed_anchor: bool = False,
+    fixed_box_size: int = 100
 ) -> pd.DataFrame:
     """
     Run inference on test images and collect predictions.
@@ -222,6 +224,8 @@ def run_inference(
         device: GPU device ID
         save_visualizations: Whether to save annotated images
         use_tta: Whether to use Test-Time Augmentation
+        fixed_anchor: If True, override predicted box sizes with fixed_box_size
+        fixed_box_size: Fixed box size in pixels (default: 100)
     
     Returns:
         DataFrame with all predictions
@@ -254,10 +258,12 @@ def run_inference(
     prediction_id = 0
     
     print(f"\n[3/3] Running inference...")
-    print(f"  • Confidence threshold: {conf_threshold}")
-    print(f"  • IoU threshold: {iou_threshold}")
-    print(f"  • Image size: {imgsz}")
-    print(f"  • Test-Time Augmentation: {'ENABLED (6 variants)' if use_tta else 'DISABLED'}")
+    print(f"  - Confidence threshold: {conf_threshold}")
+    print(f"  - IoU threshold: {iou_threshold}")
+    print(f"  - Image size: {imgsz}")
+    print(f"  - Test-Time Augmentation: {'ENABLED (6 variants)' if use_tta else 'DISABLED'}")
+    if fixed_anchor:
+        print(f"  - FIXED ANCHOR MODE: Forcing all boxes to {fixed_box_size}x{fixed_box_size}px")
     print("-" * 50)
     
     for img_path in tqdm(image_files, desc="Processing"):
@@ -329,13 +335,17 @@ def run_inference(
             
             # Add merged predictions to final list
             for pred in merged_predictions:
+                # Use fixed box size if enabled, otherwise use predicted size
+                out_width = fixed_box_size if fixed_anchor else pred['width']
+                out_height = fixed_box_size if fixed_anchor else pred['height']
+                
                 all_predictions.append({
                     'id': prediction_id,
                     'image_filename': img_path.name,
                     'x': round(pred['x'], 1),
                     'y': round(pred['y'], 1),
-                    'width': round(pred['width'], 1),
-                    'height': round(pred['height'], 1),
+                    'width': round(out_width, 1),
+                    'height': round(out_height, 1),
                     'conf': round(pred['conf'], 4),
                     'class': pred['class']
                 })
@@ -372,10 +382,14 @@ def run_inference(
                     x1, y1, x2, y2 = xyxy
                     
                     # Convert to center format (x, y, width, height)
-                    width = x2 - x1
-                    height = y2 - y1
-                    x_center = x1 + width / 2
-                    y_center = y1 + height / 2
+                    pred_width = x2 - x1
+                    pred_height = y2 - y1
+                    x_center = x1 + pred_width / 2
+                    y_center = y1 + pred_height / 2
+                    
+                    # Use fixed box size if enabled, otherwise use predicted size
+                    out_width = fixed_box_size if fixed_anchor else pred_width
+                    out_height = fixed_box_size if fixed_anchor else pred_height
                     
                     # Get confidence and class
                     conf = float(boxes.conf[i].cpu().numpy())
@@ -387,8 +401,8 @@ def run_inference(
                         'image_filename': img_path.name,
                         'x': round(x_center, 1),
                         'y': round(y_center, 1),
-                        'width': round(width, 1),
-                        'height': round(height, 1),
+                        'width': round(out_width, 1),
+                        'height': round(out_height, 1),
                         'conf': round(conf, 4),
                         'class': class_id
                     })
@@ -523,6 +537,17 @@ Examples:
         help='Skip saving visualization images'
     )
     parser.add_argument(
+        '--fixed-anchor',
+        action='store_true',
+        help='Force fixed box size (100x100) for all predictions. Use with models trained in fixedanchor mode.'
+    )
+    parser.add_argument(
+        '--box-size',
+        type=int,
+        default=100,
+        help='Fixed box size in pixels when using --fixed-anchor (default: 100)'
+    )
+    parser.add_argument(
         '--base-dir', 
         type=str, 
         default='.',
@@ -552,6 +577,7 @@ Examples:
             base_dir / 'best.pt',  # Check root directory
             base_dir / 'last.pt',
             base_dir / 'bestA.pt',
+            runs_dir / 'riva_yolo11l_fixed_anchor' / 'weights' / 'best.pt',  # Fixed anchor model
             runs_dir / 'riva_yolo11l_extreme' / 'weights' / 'best.pt',
             runs_dir / 'riva_yolo11x_extreme' / 'weights' / 'best.pt',
             runs_dir / 'riva_yolo11s_generalized' / 'weights' / 'best.pt',
@@ -563,7 +589,8 @@ Examples:
         
         # Also check for timestamped models in trained_models
         import glob
-        timestamped_models = glob.glob(str(trained_models_dir / 'best_yolo11l_extreme_*.pt'))
+        timestamped_models = glob.glob(str(trained_models_dir / 'best_fixed_anchor_*.pt'))  # Fixed anchor first
+        timestamped_models += glob.glob(str(trained_models_dir / 'best_yolo11l_extreme_*.pt'))
         timestamped_models += glob.glob(str(trained_models_dir / 'best_yolo11x_*.pt'))
         timestamped_models += glob.glob(str(trained_models_dir / 'best_yolo11s_*.pt'))
         timestamped_models += glob.glob(str(trained_models_dir / 'best_yolo11m_*.pt'))
@@ -594,6 +621,12 @@ Examples:
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     submission_path = output_dir / f'submission_{timestamp}.csv'
     
+    # Print fixed anchor info if enabled
+    if args.fixed_anchor:
+        print(f"\n*** FIXED ANCHOR MODE ***")
+        print(f"All predictions will use {args.box_size}x{args.box_size}px boxes")
+        print(f"(Matches ground truth: all boxes are 100x100 pixels)")
+    
     # Run inference
     predictions_df = run_inference(
         model_path=model_path,
@@ -604,7 +637,9 @@ Examples:
         imgsz=args.imgsz,
         device=args.device,
         save_visualizations=not args.no_vis,
-        use_tta=args.tta
+        use_tta=args.tta,
+        fixed_anchor=args.fixed_anchor,
+        fixed_box_size=args.box_size
     )
     
     if len(predictions_df) == 0:

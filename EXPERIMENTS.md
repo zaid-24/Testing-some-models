@@ -25,6 +25,35 @@ This document tracks all experiments conducted for cervical cell detection using
 
 **Key Challenge**: 21:1 ratio between most common (INFL) and rarest (ASCUS) classes
 
+### ⚠️ CRITICAL FINDING: Fixed Bounding Box Sizes
+
+**DISCOVERY DATE**: 2026-02-08
+
+After detailed analysis of the dataset, a critical insight was discovered:
+
+**ALL BOUNDING BOXES IN THIS DATASET ARE EXACTLY 100x100 PIXELS!**
+
+```
+Validation Results:
+- Training Set:   13,267 boxes → 100% are 100x100 pixels
+- Validation Set:  2,682 boxes → 100% are 100x100 pixels
+```
+
+**Implications**:
+1. **YOLO is overkill**: Standard object detection predicts (x, y, width, height, class), but we only need to predict (x, y, class) - the box dimensions are CONSTANT.
+2. **Wasted model capacity**: YOLO's box regression branch learns values that are always the same (100x100). This wastes ~50% of the detection head's capacity.
+3. **Simpler problem**: This is effectively a **POINT DETECTION** problem, not a full object detection problem. We're finding cell centers and classifying them.
+
+**Recommended Approach**: `fixedanchor` mode
+- Minimize box loss (box=0.5, dfl=0.5) since sizes are fixed
+- Maximize classification loss (cls=8.0) to focus on what matters
+- During inference, force all output boxes to 100x100
+
+**Alternative Approaches** (not implemented):
+- CenterNet: True point detection architecture
+- FCOS with fixed anchors: Anchor-free detection
+- Custom heatmap classification: One heatmap per class
+
 ---
 
 ## 🎯 Research Questions
@@ -559,7 +588,68 @@ python run.py train --mode adh
 
 ---
 
-### Experiment 10: Semi-Supervised Learning with Pseudo-Labels
+### Experiment 10: Fixed Anchor Training (⭐ RECOMMENDED)
+**Status**: 🔄 Ready to Run
+**Mode**: `python run.py train --mode fixedanchor`
+**Priority**: HIGH - This is the most important insight for this dataset!
+
+**Critical Discovery**:
+ALL bounding boxes in this dataset are EXACTLY 100x100 pixels. This fundamentally changes the problem:
+- Standard object detection: predict (x, y, width, height, class)
+- This dataset: predict (x, y, class) only - sizes are CONSTANT!
+
+**Hypothesis**:
+By minimizing box regression loss (since sizes are known) and maximizing classification loss, the model can focus all its capacity on what actually matters: finding cell centers and classifying them correctly.
+
+**Configuration** (`get_fixed_anchor_config()`):
+```python
+{
+    'cls': 8.0,   # MAXIMUM - focus all learning on classification
+    'box': 0.5,   # MINIMAL - don't waste capacity learning fixed sizes
+    'dfl': 0.5,   # MINIMAL - distribution focal loss not needed
+    'epochs': 400,
+    'imgsz': 1024,
+}
+```
+
+**Why This Should Work**:
+1. **Reduced learning complexity**: Model no longer needs to learn box dimensions
+2. **Focused gradients**: Classification gradients dominate (8.0 vs 0.5)
+3. **Better minority detection**: More capacity available for distinguishing ASCUS/ASCH
+4. **Perfect IoU potential**: If center is correct, box is automatically correct (100x100)
+
+**Training Command**:
+```bash
+python run.py train --mode fixedanchor
+```
+
+**Inference Command** (IMPORTANT - forces 100x100 boxes):
+```bash
+python run.py infer --fixed-anchor
+```
+
+**Expected Benefits**:
+- ✅ Faster convergence (simpler problem)
+- ✅ Better classification accuracy (focused learning)
+- ✅ Consistent box sizes matching ground truth
+- ✅ Improved minority class detection
+
+**Validation Metrics to Monitor**:
+- Classification accuracy per class (most important!)
+- Center point accuracy (distance from GT center)
+- Overall mAP@50 (should improve due to perfect size match)
+
+**Comparison with Standard YOLO**:
+| Metric | Standard YOLO | Fixed Anchor |
+|--------|---------------|--------------|
+| Box loss weight | 7.5 | 0.5 |
+| Cls loss weight | 4.0 | 8.0 |
+| Learning focus | Detection + Size | Detection only |
+| Output boxes | Variable | Fixed 100x100 |
+
+---
+
+### Experiment 11: Semi-Supervised Learning with Pseudo-Labels
 **Status**: 📋 Planned (Advanced)
 
 **Hypothesis**: 

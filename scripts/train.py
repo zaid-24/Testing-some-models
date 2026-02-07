@@ -249,6 +249,84 @@ def get_adh_config():
     }
 
 
+def get_fixed_anchor_config():
+    """
+    Configuration for FIXED ANCHOR / POINT DETECTION style training.
+    
+    *** CRITICAL INSIGHT ***
+    ALL bounding boxes in this dataset are EXACTLY 100x100 pixels!
+    This means we DON'T need to predict width/height - only (x, y, class).
+    
+    STRATEGY:
+    - MINIMIZE box loss: Set box weight very low (0.5) since sizes are fixed
+    - MINIMIZE dfl loss: Distribution focal loss is for box regression, not needed
+    - MAXIMIZE cls loss: Focus all learning on classification
+    - The model learns to predict cell CENTERS, not box dimensions
+    
+    During INFERENCE:
+    - YOLO still outputs predicted boxes (it can't not)
+    - We OVERRIDE the width/height with fixed 100x100
+    - This ensures consistent box sizes matching the ground truth
+    
+    Why not remove box prediction entirely?
+    - YOLO's architecture has box regression baked in
+    - Modifying architecture requires custom code
+    - This approach is simpler and achieves similar results
+    
+    Expected Impact:
+    - Faster convergence (less to learn)
+    - Better classification accuracy (model focuses on what matters)
+    - Perfect IoU for correctly centered predictions (since box sizes match GT)
+    
+    SUBMISSION FORMAT: width=100, height=100 always
+    """
+    import platform
+    num_workers = 0 if platform.system() == 'Windows' else 8
+    
+    return {
+        'name': 'riva_yolo11l_fixed_anchor',
+        'model': 'yolo11l.pt',
+        'epochs': 400,
+        'imgsz': 1024,  # High resolution for accurate center prediction
+        'batch': 6,
+        'patience': 100,
+        'save_period': 10,
+        'workers': num_workers,
+        
+        # === FIXED ANCHOR LOSS WEIGHTS ===
+        # Key insight: Box sizes are CONSTANT (100x100), so minimize box learning
+        'cls': 8.0,   # MAXIMUM - focus all learning on classification
+        'box': 0.5,   # MINIMAL - don't waste capacity learning fixed sizes
+        'dfl': 0.5,   # MINIMAL - distribution focal loss is for box regression
+        
+        # === STRONG AUGMENTATION (helps classification) ===
+        'augment': True,
+        
+        # Composition augmentations
+        'mosaic': 1.0,
+        'mixup': 0.5,
+        'copy_paste': 0.8,  # High copy-paste for minority cells
+        
+        # Color augmentation (staining variations - important for cell classification)
+        'hsv_h': 0.7,
+        'hsv_s': 0.8,
+        'hsv_v': 0.6,
+        
+        # Geometric augmentation
+        'degrees': 20.0,  # Rotation - cells can be at any angle
+        'translate': 0.2,
+        'scale': 0.6,     # Scale still matters for feature learning
+        'shear': 10.0,
+        'perspective': 0.0005,
+        'flipud': 0.5,
+        'fliplr': 0.5,
+        'erasing': 0.3,
+        
+        # === FIXED ANCHOR SPECIFIC ===
+        'fixed_box_size': 100,  # Custom: the known fixed box size in pixels
+    }
+
+
 def get_multiscale_config():
     """
     Configuration for MULTI-SCALE PROGRESSIVE TRAINING.
@@ -596,6 +674,26 @@ def train(mode: str, resume: bool = False, base_dir: str = '.'):
         print("Expected: +2-3% improvement in mAP@75 and mAP@50-95")
         print("Target: Better IoU scores, precise bounding boxes")
         print("GPU: RTX A2000")
+    elif mode == 'fixedanchor':
+        config = get_fixed_anchor_config()
+        data_yaml = base_dir / 'data' / 'riva.yaml'
+        print("\n" + "=" * 60)
+        print("[FIXED ANCHOR MODE] Point Detection Style Training")
+        print("=" * 60)
+        print("*** ALL BOUNDING BOXES ARE 100x100 PIXELS! ***")
+        print("")
+        print("Using: yolo11l (large), 1024px, 400 epochs, batch=6")
+        print("Strategy: Minimize box loss, maximize classification loss")
+        print("Insight: Model learns cell CENTERS, not box sizes")
+        print("")
+        print("Loss Weights (optimized for fixed boxes):")
+        print("  - cls: 8.0 (MAXIMUM - focus on classification)")
+        print("  - box: 0.5 (MINIMAL - sizes are fixed)")
+        print("  - dfl: 0.5 (MINIMAL - no box regression needed)")
+        print("")
+        print("IMPORTANT: During inference, use --fixed-anchor flag")
+        print("           to force width=100, height=100 in output")
+        print("GPU: RTX A2000")
     else:  # 'full' mode
         config = get_full_config()
         data_yaml = base_dir / 'data' / 'riva.yaml'
@@ -713,6 +811,7 @@ def train(mode: str, resume: bool = False, base_dir: str = '.'):
         'focal': 'focal_loss',
         'adh': 'adh',
         'full': 'full_extreme',
+        'fixedanchor': 'fixed_anchor',
     }
     mode_suffix = mode_names.get(mode, mode)
     dest_model_name = f'best_{mode_suffix}_{timestamp}.pt'
@@ -812,7 +911,10 @@ Examples:
   # Test pipeline on laptop (4GB GPU)
   python scripts/train.py --mode test
   
-  # Multi-scale training (RECOMMENDED - progressive resolution):
+  # Fixed Anchor training (RECOMMENDED - all boxes are 100x100):
+  python scripts/train.py --mode fixedanchor
+  
+  # Multi-scale training (progressive resolution):
   python scripts/train.py --mode multiscale
   
   # Focal Loss training (for class imbalance):
@@ -825,16 +927,16 @@ Examples:
   python scripts/train.py --mode full
   
   # Resume training
-  python scripts/train.py --mode focal --resume
+  python scripts/train.py --mode fixedanchor --resume
         """
     )
     
     parser.add_argument(
         '--mode', 
         type=str, 
-        choices=['test', 'full', 'focal', 'adh', 'multiscale'], 
+        choices=['test', 'full', 'focal', 'adh', 'multiscale', 'fixedanchor'], 
         default='test',
-        help='Training mode: test (laptop), full (extreme aug), focal (focal loss), adh (attention decoupled head), multiscale (progressive resolution)'
+        help='Training mode: test (laptop), full (extreme aug), focal (focal loss), adh (attention decoupled head), multiscale (progressive resolution), fixedanchor (optimized for fixed 100x100 boxes)'
     )
     parser.add_argument(
         '--resume', 

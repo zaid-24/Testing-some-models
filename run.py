@@ -75,8 +75,8 @@ Examples:
     
     # Train command
     train_parser = subparsers.add_parser('train', help='Train YOLOv11 model')
-    train_parser.add_argument('--mode', choices=['test', 'full', 'focal', 'adh', 'multiscale'], default='test',
-                              help='Training mode (test=laptop, full=extreme aug, focal=focal loss, adh=attention decoupled head, multiscale=progressive resolution)')
+    train_parser.add_argument('--mode', choices=['test', 'full', 'focal', 'adh', 'multiscale', 'fixedanchor'], default='test',
+                              help='Training mode (test=laptop, full=extreme aug, focal=focal loss, adh=attention decoupled head, multiscale=progressive resolution, fixedanchor=optimized for fixed 100x100 boxes)')
     train_parser.add_argument('--resume', action='store_true',
                               help='Resume from last checkpoint')
     
@@ -90,6 +90,8 @@ Examples:
                               help='IoU threshold for NMS')
     infer_parser.add_argument('--tta', action='store_true',
                               help='Enable Test-Time Augmentation')
+    infer_parser.add_argument('--fixed-anchor', action='store_true',
+                              help='Force fixed 100x100 box size (use with fixedanchor trained models)')
     
     # Visualize command
     vis_parser = subparsers.add_parser('visualize', help='Visualize annotations/predictions')
@@ -142,6 +144,8 @@ Examples:
         cmd.extend(['--conf', str(args.conf), '--iou', str(args.iou)])
         if hasattr(args, 'tta') and args.tta:
             cmd.append('--tta')
+        if hasattr(args, 'fixed_anchor') and args.fixed_anchor:
+            cmd.append('--fixed-anchor')
         run_command(cmd, 'Running inference on test set')
     
     elif args.command == 'visualize':
