@@ -180,60 +180,6 @@ def visualize_from_csv(
     print(f"\n✓ Saved {len(selected_images)} visualizations to: {output_dir}")
 
 
-def visualize_from_yolo_labels(
-    images_dir: str,
-    labels_dir: str,
-    output_dir: str,
-    num_samples: int = 10
-):
-    """Visualize annotations from YOLO format label files."""
-    label_files = list(Path(labels_dir).glob('*.txt'))
-    
-    if len(label_files) == 0:
-        print("No label files found!")
-        return
-    
-    selected_labels = random.sample(label_files, min(num_samples, len(label_files)))
-    os.makedirs(output_dir, exist_ok=True)
-    
-    for label_path in tqdm(selected_labels, desc="Visualizing"):
-        # Find corresponding image
-        img_name = label_path.stem + '.png'
-        img_path = os.path.join(images_dir, img_name)
-        
-        if not os.path.exists(img_path):
-            # Try jpg
-            img_name = label_path.stem + '.jpg'
-            img_path = os.path.join(images_dir, img_name)
-        
-        if not os.path.exists(img_path):
-            continue
-        
-        # Load image
-        img = cv2.imread(img_path)
-        if img is None:
-            continue
-        
-        # Load labels
-        boxes = []
-        with open(label_path, 'r') as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) >= 5:
-                    class_id = int(parts[0])
-                    x, y, w, h = map(float, parts[1:5])
-                    boxes.append([class_id, x, y, w, h])
-        
-        # Draw boxes
-        img_with_boxes = draw_boxes(img, boxes, 'ground_truth')
-        
-        # Save
-        output_path = os.path.join(output_dir, f"vis_{img_name}")
-        cv2.imwrite(output_path, img_with_boxes)
-    
-    print(f"\n✓ Saved {len(selected_labels)} visualizations to: {output_dir}")
-
-
 def create_legend(output_path: str):
     """Create a color legend for the classes."""
     legend_height = 40 * len(CLASS_NAMES)
@@ -264,7 +210,7 @@ def main():
     parser = argparse.ArgumentParser(description='Visualize predictions and annotations')
     parser.add_argument('--split', type=str, choices=['train', 'val'], default='val',
                         help='Dataset split to visualize')
-    parser.add_argument('--source', type=str, choices=['csv', 'yolo', 'predictions'],
+    parser.add_argument('--source', type=str, choices=['csv', 'predictions'],
                         default='csv', help='Annotation source format')
     parser.add_argument('--num-samples', type=int, default=10,
                         help='Number of images to visualize')
@@ -294,18 +240,6 @@ def main():
         visualize_from_csv(
             csv_path=str(csv_path),
             images_dir=str(images_dir),
-            output_dir=str(output_dir),
-            num_samples=args.num_samples
-        )
-    
-    elif args.source == 'yolo':
-        labels_dir = base_dir / 'data' / 'labels' / args.split
-        images_dir = base_dir / 'dataset' / 'images' / 'images' / args.split
-        output_dir = output_base / f'{args.split}_yolo'
-        
-        visualize_from_yolo_labels(
-            images_dir=str(images_dir),
-            labels_dir=str(labels_dir),
             output_dir=str(output_dir),
             num_samples=args.num_samples
         )

@@ -1,5 +1,5 @@
 """
-Quick script to verify PyTorch and CUDA installation.
+Quick script to verify PyTorch and CUDA installation for CenterNet.
 
 Usage:
     python verify_installation.py
@@ -7,20 +7,19 @@ Usage:
 
 import sys
 
+
 def main():
     print("=" * 70)
-    print("INSTALLATION VERIFICATION")
+    print("INSTALLATION VERIFICATION (CenterNet Pipeline)")
     print("=" * 70)
-    
-    # Check Python version
+
     print(f"\nPython version: {sys.version}")
-    
+
     # Check PyTorch
     try:
         import torch
         print(f"\n[OK] PyTorch installed: {torch.__version__}")
-        
-        # Check CUDA
+
         cuda_available = torch.cuda.is_available()
         if cuda_available:
             print(f"[OK] CUDA available: True")
@@ -30,7 +29,7 @@ def main():
         else:
             print(f"[WARNING] CUDA available: False")
             print(f"\n    You have CPU-only PyTorch installed!")
-            print(f"    This will NOT work for training on GPU.")
+            print(f"    Training will be VERY slow without GPU.")
             print(f"\n    To fix:")
             print(f"    1. Uninstall: pip uninstall torch torchvision torchaudio -y")
             print(f"    2. Reinstall with CUDA:")
@@ -40,41 +39,61 @@ def main():
         print("\n    Install with:")
         print("    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121")
         return False
-    
-    # Check Ultralytics
+
+    # Check torchvision
     try:
-        from ultralytics import YOLO
-        print(f"[OK] Ultralytics installed")
+        import torchvision
+        print(f"[OK] torchvision installed: {torchvision.__version__}")
     except ImportError:
-        print("[ERROR] Ultralytics not installed!")
-        print("\n    Install with:")
-        print("    pip install ultralytics")
+        print("[ERROR] torchvision not installed!")
+        print("\n    Install with PyTorch:")
+        print("    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121")
         return False
-    
+
     # Check other dependencies
     try:
         import pandas
         import numpy
         import cv2
-        import yaml
-        print(f"[OK] Other dependencies (pandas, numpy, opencv, yaml) installed")
+        import albumentations
+        print(f"[OK] pandas: {pandas.__version__}")
+        print(f"[OK] numpy: {numpy.__version__}")
+        print(f"[OK] opencv: {cv2.__version__}")
+        print(f"[OK] albumentations: {albumentations.__version__}")
     except ImportError as e:
         print(f"[ERROR] Missing dependency: {e}")
         print("\n    Install with:")
         print("    pip install -r requirements.txt")
         return False
-    
-    # Final check
-    print("\n" + "=" * 70)
+
+    # Quick model test
+    print(f"\n{'='*70}")
+    print("Quick Model Test...")
+    try:
+        from models.centernet import CellCenterNet
+        model = CellCenterNet(num_classes=8, backbone='resnet50', pretrained=False)
+        x = torch.randn(1, 3, 256, 256)
+        hm, off = model(x)
+        print(f"[OK] CenterNet model: input {x.shape} → heatmap {hm.shape}, offset {off.shape}")
+    except Exception as e:
+        print(f"[WARNING] Model test failed: {e}")
+        print("    This might be OK if you haven't set up the project structure yet.")
+
+    # Final status
+    print(f"\n{'='*70}")
     if cuda_available:
         print("[SUCCESS] All checks passed! Ready for GPU training.")
+        print("\nNext steps:")
+        print("  1. python run.py analyze        # Check dataset")
+        print("  2. python run.py train --mode test   # Quick test")
+        print("  3. python run.py train --mode full   # Full training")
     else:
         print("[WARNING] PyTorch installed but CUDA not available.")
         print("You can train on CPU, but it will be VERY slow.")
-        print("For GPU training, reinstall PyTorch with CUDA support.")
     print("=" * 70)
-    
+
     return cuda_available
+
 
 if __name__ == '__main__':
     success = main()
