@@ -12,7 +12,7 @@ Decoding (Inference):
     2. Find local maxima (peaks) above confidence threshold
     3. Add sub-pixel offset refinement
     4. Scale coordinates back to original image space
-    5. Attach fixed 100x100 box → done! No traditional NMS needed.
+    5. Attach fixed 100x100 box -- done! No traditional NMS needed.
 """
 
 import math

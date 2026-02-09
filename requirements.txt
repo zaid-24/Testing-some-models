@@ -40,5 +40,8 @@ tqdm>=4.65.0
 # Data augmentation (with keypoint support for CenterNet)
 albumentations>=1.3.0
 
+# Stage 2 classifier (EfficientNet via timm)
+timm>=0.9.0
+
 # Utilities
 pyyaml>=6.0

@@ -1,5 +1,12 @@
 """
-Quick script to verify PyTorch and CUDA installation for CenterNet.
+Quick script to verify installation for the Two-Stage Cell Detection Pipeline.
+
+Checks:
+    1. PyTorch + CUDA
+    2. torchvision (for ResNet backbone)
+    3. timm (for EfficientNet classifier)
+    4. Other dependencies (pandas, numpy, cv2, albumentations)
+    5. Quick model test (both stages)
 
 Usage:
     python verify_installation.py
@@ -10,7 +17,7 @@ import sys
 
 def main():
     print("=" * 70)
-    print("INSTALLATION VERIFICATION (CenterNet Pipeline)")
+    print("INSTALLATION VERIFICATION (Two-Stage Pipeline)")
     print("=" * 70)
 
     print(f"\nPython version: {sys.version}")
@@ -26,6 +33,8 @@ def main():
             print(f"[OK] CUDA version: {torch.version.cuda}")
             print(f"[OK] GPU device: {torch.cuda.get_device_name(0)}")
             print(f"[OK] GPU count: {torch.cuda.device_count()}")
+            vram = torch.cuda.get_device_properties(0).total_memory / 1e9
+            print(f"[OK] VRAM: {vram:.1f} GB")
         else:
             print(f"[WARNING] CUDA available: False")
             print(f"\n    You have CPU-only PyTorch installed!")
@@ -46,8 +55,17 @@ def main():
         print(f"[OK] torchvision installed: {torchvision.__version__}")
     except ImportError:
         print("[ERROR] torchvision not installed!")
-        print("\n    Install with PyTorch:")
+        print("    Install with PyTorch:")
         print("    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121")
+        return False
+
+    # Check timm (for EfficientNet)
+    try:
+        import timm
+        print(f"[OK] timm installed: {timm.__version__}")
+    except ImportError:
+        print("[ERROR] timm not installed!")
+        print("    Install with: pip install timm")
         return False
 
     # Check other dependencies
@@ -66,27 +84,41 @@ def main():
         print("    pip install -r requirements.txt")
         return False
 
-    # Quick model test
+    # Quick model tests
     print(f"\n{'='*70}")
-    print("Quick Model Test...")
+    print("Quick Model Tests...")
+
+    # Test Stage 1: Detector
     try:
         from models.centernet import CellCenterNet
-        model = CellCenterNet(num_classes=8, backbone='resnet50', pretrained=False)
+        model = CellCenterNet(num_classes=1, backbone='resnet50', pretrained=False)
         x = torch.randn(1, 3, 256, 256)
         hm, off = model(x)
-        print(f"[OK] CenterNet model: input {x.shape} → heatmap {hm.shape}, offset {off.shape}")
+        print(f"[OK] Stage 1 Detector: input {x.shape} -> heatmap {hm.shape}, offset {off.shape}")
+        print(f"     (Binary heatmap: 1 channel = cell/no-cell)")
     except Exception as e:
-        print(f"[WARNING] Model test failed: {e}")
-        print("    This might be OK if you haven't set up the project structure yet.")
+        print(f"[WARNING] Detector test failed: {e}")
+
+    # Test Stage 2: Classifier
+    try:
+        from models.classifier import CellClassifier
+        model = CellClassifier(num_classes=8, backbone='efficientnet_b2', pretrained=False)
+        x = torch.randn(1, 3, 224, 224)
+        logits = model(x)
+        print(f"[OK] Stage 2 Classifier: input {x.shape} -> logits {logits.shape}")
+        print(f"     (8 classes: NILM, ENDO, INFL, ASCUS, LSIL, HSIL, ASCH, SCC)")
+    except Exception as e:
+        print(f"[WARNING] Classifier test failed: {e}")
 
     # Final status
     print(f"\n{'='*70}")
     if cuda_available:
         print("[SUCCESS] All checks passed! Ready for GPU training.")
         print("\nNext steps:")
-        print("  1. python run.py analyze        # Check dataset")
-        print("  2. python run.py train --mode test   # Quick test")
-        print("  3. python run.py train --mode full   # Full training")
+        print("  1. python run.py analyze                    # Check dataset")
+        print("  2. python run.py train --mode test          # Quick test (both stages)")
+        print("  3. python run.py train --mode full          # Full training (both stages)")
+        print("  4. python run.py infer --conf 0.3           # Generate submission")
     else:
         print("[WARNING] PyTorch installed but CUDA not available.")
         print("You can train on CPU, but it will be VERY slow.")

@@ -134,7 +134,7 @@ class CellCenterNet(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
         # Focal loss prior for heatmap head final layer
-        # bias = log(prior / (1 - prior)) with prior = 0.1 → -2.19
+        # bias = log(prior / (1 - prior)) with prior = 0.1 = -2.19
         self.heatmap_head[-1].bias.data.fill_(-2.19)
 
     def forward(self, x):

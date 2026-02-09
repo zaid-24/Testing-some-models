@@ -121,7 +121,7 @@ def plot_class_distribution(train_df: pd.DataFrame, val_df: pd.DataFrame, save_p
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"  ✓ Saved class distribution plot: {save_path}")
+    print(f"  [OK] Saved class distribution plot: {save_path}")
 
 
 def plot_annotations_per_image(train_df: pd.DataFrame, val_df: pd.DataFrame, save_path: str):
@@ -149,7 +149,7 @@ def plot_annotations_per_image(train_df: pd.DataFrame, val_df: pd.DataFrame, sav
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"  ✓ Saved annotations distribution plot: {save_path}")
+    print(f"  [OK] Saved annotations distribution plot: {save_path}")
 
 
 def main():

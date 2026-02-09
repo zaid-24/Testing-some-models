@@ -1,18 +1,24 @@
 """
-Main runner script for RIVA Cell Detection Pipeline (CenterNet).
+Main runner script for RIVA Cell Detection Pipeline.
 
-This is the single entry point for all pipeline operations.
+Two-Stage Architecture:
+    Stage 1: Binary CenterNet detector — finds all cell centers (class-agnostic)
+    Stage 2: EfficientNet classifier — classifies cell patches into 8 classes
 
 Usage:
     # Analyze dataset statistics
     python run.py analyze
 
-    # Train CenterNet model
-    python run.py train --mode test           # Quick test (5 epochs, 512px)
-    python run.py train --mode full           # Full training (140 epochs, 1024px)
-    python run.py train --mode full --backbone resnet101
+    # Train both stages
+    python run.py train --mode full --stage both
 
-    # Run inference on test set
+    # Train detector only
+    python run.py train --mode full --stage detect --backbone resnet50
+
+    # Train classifier only
+    python run.py train --mode full --stage classify --cls-backbone efficientnet_b2
+
+    # Run two-stage inference
     python run.py infer --conf 0.3
 
     # Visualize results
@@ -38,24 +44,26 @@ def run_command(cmd: list, description: str):
         print(f"\n[ERROR] Command failed with return code {result.returncode}")
         sys.exit(1)
 
-    print(f"\n[OK] {description} — Complete!")
+    print(f"\n[OK] {description} -- Complete!")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='RIVA Cell Detection Pipeline (CenterNet)',
+        description='RIVA Cell Detection -- Two-Stage Pipeline',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Pipeline Steps:
   1. analyze    - Analyze dataset statistics & class distribution
-  2. train      - Train CenterNet model
-  3. infer      - Run inference on test set & generate submission
+  2. train      - Train detector and/or classifier (two stages)
+  3. infer      - Two-stage inference -> submission CSV
   4. visualize  - Visualize annotations or predictions
 
 Examples:
   python run.py analyze
-  python run.py train --mode test
-  python run.py train --mode full --backbone resnet50
+  python run.py train --mode test --stage both
+  python run.py train --mode full --stage detect --backbone resnet50
+  python run.py train --mode full --stage classify --cls-backbone efficientnet_b2
+  python run.py train --mode full --stage both --resume
   python run.py infer --conf 0.3
   python run.py visualize --split val --source csv
         """
@@ -67,30 +75,45 @@ Examples:
     subparsers.add_parser('analyze', help='Analyze dataset statistics')
 
     # Train command
-    train_parser = subparsers.add_parser('train', help='Train CenterNet model')
+    train_parser = subparsers.add_parser('train', help='Train detector and/or classifier')
     train_parser.add_argument(
         '--mode', choices=['test', 'full'], default='test',
-        help='Training mode: test (quick 5 epochs) or full (140 epochs)'
+        help='Training mode: test (quick 5 epochs) or full (competition)'
+    )
+    train_parser.add_argument(
+        '--stage', choices=['detect', 'classify', 'both'], default='both',
+        help='Which stage to train (default: both)'
     )
     train_parser.add_argument(
         '--backbone', choices=['resnet34', 'resnet50', 'resnet101'],
-        default='resnet50', help='Backbone architecture (default: resnet50)'
+        default='resnet50', help='Detector backbone (default: resnet50)'
+    )
+    train_parser.add_argument(
+        '--cls-backbone',
+        choices=['efficientnet_b0', 'efficientnet_b2', 'convnext_tiny'],
+        default='efficientnet_b2', help='Classifier backbone (default: efficientnet_b2)'
     )
     train_parser.add_argument(
         '--resume', action='store_true', help='Resume from last checkpoint'
     )
 
     # Inference command
-    infer_parser = subparsers.add_parser('infer', help='Run inference on test set')
+    infer_parser = subparsers.add_parser('infer', help='Run two-stage inference on test set')
     infer_parser.add_argument(
-        '--model', type=str, default=None, help='Path to model weights'
+        '--det-model', type=str, default=None,
+        help='Path to detector model (default: auto-detect)'
+    )
+    infer_parser.add_argument(
+        '--cls-model', type=str, default=None,
+        help='Path to classifier model (default: auto-detect)'
     )
     infer_parser.add_argument(
         '--conf', type=float, default=0.3,
-        help='Confidence threshold (default: 0.3)'
+        help='Detection confidence threshold (default: 0.3)'
     )
     infer_parser.add_argument(
-        '--imgsz', type=int, default=1024, help='Image size for inference'
+        '--imgsz', type=int, default=1024,
+        help='Detector input image size (default: 1024)'
     )
 
     # Visualize command
@@ -116,7 +139,9 @@ Examples:
     print("""
     ===================================================================
 
-         RIVA DET — Pap Smear Cell Detection — CenterNet Pipeline
+         RIVA DET -- Pap Smear Cell Detection -- Two-Stage Pipeline
+         Stage 1: Binary CenterNet Detector (ResNet-50)
+         Stage 2: Cell Type Classifier (EfficientNet-B2)
 
     ===================================================================
     """)
@@ -133,21 +158,31 @@ Examples:
         cmd = [
             python_cmd, 'scripts/train.py',
             '--mode', args.mode,
+            '--stage', args.stage,
             '--backbone', args.backbone,
+            '--cls-backbone', args.cls_backbone,
         ]
         if args.resume:
             cmd.append('--resume')
-        run_command(
-            cmd,
-            f'Training CenterNet ({args.mode} mode, {args.backbone} backbone)'
-        )
+
+        stage_desc = {
+            'detect': f'Stage 1: Detector ({args.backbone})',
+            'classify': f'Stage 2: Classifier ({args.cls_backbone})',
+            'both': f'Both Stages ({args.backbone} + {args.cls_backbone})',
+        }
+        run_command(cmd, f'Training {stage_desc[args.stage]} [{args.mode} mode]')
 
     elif args.command == 'infer':
-        cmd = [python_cmd, 'scripts/inference.py']
-        if args.model:
-            cmd.extend(['--model', args.model])
-        cmd.extend(['--conf', str(args.conf), '--imgsz', str(args.imgsz)])
-        run_command(cmd, 'Running inference on test set')
+        cmd = [
+            python_cmd, 'scripts/inference.py',
+            '--conf', str(args.conf),
+            '--imgsz', str(args.imgsz),
+        ]
+        if args.det_model:
+            cmd.extend(['--det-model', args.det_model])
+        if args.cls_model:
+            cmd.extend(['--cls-model', args.cls_model])
+        run_command(cmd, 'Running two-stage inference')
 
     elif args.command == 'visualize':
         run_command(

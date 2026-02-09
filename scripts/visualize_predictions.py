@@ -177,7 +177,7 @@ def visualize_from_csv(
         output_path = os.path.join(output_dir, f"vis_{img_name}")
         cv2.imwrite(output_path, img_with_boxes)
     
-    print(f"\n✓ Saved {len(selected_images)} visualizations to: {output_dir}")
+    print(f"\n[OK] Saved {len(selected_images)} visualizations to: {output_dir}")
 
 
 def create_legend(output_path: str):
@@ -203,7 +203,7 @@ def create_legend(output_path: str):
         )
     
     cv2.imwrite(output_path, legend)
-    print(f"✓ Legend saved to: {output_path}")
+    print(f"[OK] Legend saved to: {output_path}")
 
 
 def main():
